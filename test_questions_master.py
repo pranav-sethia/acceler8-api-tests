@@ -4,7 +4,7 @@ import json
 
 from config import API_HOST, HEADERS
 
-QUESTION_URL       = f"{API_HOST}/backend/v1/question"
+QUESTION_URL = f"{API_HOST}/backend/v1/question"
 QUESTIONS_LIST_URL = f"{API_HOST}/backend/v1/questions"
 
 @pytest.fixture(scope="module")
