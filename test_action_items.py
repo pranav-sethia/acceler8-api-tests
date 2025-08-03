@@ -1,9 +1,32 @@
 import requests
 import pytest
-from config import API_HOST, HEADERS
+import time
+import random
+import string
+from config import API_HOST, HEADERS, RAPIDAPI_KEY
 
 ASSESS_URL      = f"{API_HOST}/backend/v1/assessment"
 ASSESS_LIST_URL = f"{API_HOST}/backend/v1/assessments"
+INBOXES_API = "https://inboxes-com.p.rapidapi.com"
+MAILTM_API = "https://api.mail.tm"
+
+
+INBOXES_API_TOKEN = RAPIDAPI_KEY
+
+@pytest.fixture(scope="module")
+def created_organisation():
+    body = {
+        "internal_name": "PranavAutoOrg",
+        "name": "Pranav Org",
+        "colour_theme": "DRIVEN_RED",
+        "logo": "comet.jpg"
+    }
+    url = f"{API_HOST}/backend/v1/organisation"
+    r = requests.post(url, json=body, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    oid = r.json()["data"]["id"]
+    yield oid
+    requests.delete(f"{url}/{oid}", headers=HEADERS)
 
 @pytest.fixture(scope="module")
 def created_assessment():
@@ -22,7 +45,45 @@ def created_assessment():
 
 
 @pytest.fixture(scope="module")
-def created_action_item(created_assessment):
+def created_employee(created_assessment, mailtm_account):
+    email = mailtm_account["address"]
+
+    body = {
+        "email": email,
+        "name": "E1",
+        "position": "A",
+        "title": "A",
+        "number_of_direct_reports": "1",
+        "number_of_indirect_reports": "1",
+        "join_date": "2025-06-01",
+        "tenure": 1,
+        "years_to_retirement": 1,
+        "manager": {
+            "email": f"mgr+{random.randint(1000,9999)}@example.com",
+            "name": "Mgr",
+            "position": "M",
+            "title": "M"
+        },
+        "performance_rating": "1",
+        "voice_of_customer_results": "1",
+        "team_attrition_rate_current_year": "1",
+        "team_attrition_rate_previous_year": "1",
+        "voice_of_employee_results": "1"
+    }
+
+    url = f"{API_HOST}/backend/v1/assessment/{created_assessment}/employee"
+    r = requests.post(url, json=body, headers=HEADERS)
+    assert r.status_code == 201, r.text
+    emp_id = r.json()["data"]["id"]
+
+    print(emp_id)
+    yield emp_id
+
+    requests.delete(f"{API_HOST}/backend/v1/employee/{emp_id}", headers=HEADERS)
+
+
+@pytest.fixture(scope="module")
+def created_action_item(created_assessment, created_organisation, created_employee):
     base         = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     create_url   = f"{base}/action-item"
 
@@ -54,7 +115,7 @@ def created_action_item(created_assessment):
         ],
         "recipient_emails": [],
         "send_to_all": True,
-        "organisation_id": "2c940cb1-0431-40f7-a114-9c481194e0fc"
+        "organisation_id": created_organisation
     }
 
     r = requests.post(create_url, json=body, headers=HEADERS)
@@ -76,7 +137,7 @@ def test_get_action_item_details(created_assessment, created_action_item):
     assert data["title"] == "A"
 
 
-def test_update_action_item(created_assessment, created_action_item):
+def test_update_action_item(created_assessment, created_action_item, created_organisation):
     base       = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     update_url = f"{base}/action-item/{created_action_item}"
 
@@ -108,7 +169,7 @@ def test_update_action_item(created_assessment, created_action_item):
         ],
         "recipient_emails": [],
         "send_to_all": True,
-        "organisation_id": "2c940cb1-0431-40f7-a114-9c481194e0fc"
+        "organisation_id": created_organisation
     }
 
     r = requests.put(update_url, json=body, headers=HEADERS)
@@ -132,7 +193,7 @@ def test_list_action_items(created_assessment, created_action_item):
     assert created_action_item in [i["id"] for i in items]
 
 
-def test_delete_action_item(created_assessment):
+def test_delete_action_item(created_assessment, created_organisation):
     base       = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     create_url = f"{base}/action-item"
 
@@ -154,7 +215,7 @@ def test_delete_action_item(created_assessment):
         "quizzes": [],
         "recipient_emails": [],
         "send_to_all": True,
-        "organisation_id": "2c940cb1-0431-40f7-a114-9c481194e0fc"
+        "organisation_id": created_organisation
     }
     r0 = requests.post(create_url, json=body, headers=HEADERS)
     assert r0.status_code == 200, r0.text
@@ -165,3 +226,84 @@ def test_delete_action_item(created_assessment):
 
     r2 = requests.get(f"{create_url}/{did}", headers=HEADERS)
     assert r2.status_code in (403, 404)
+
+
+@pytest.fixture(scope="module")
+def mailtm_account():
+    r = requests.get(f"{MAILTM_API}/domains")
+    assert r.status_code == 200, r.text
+    domains = r.json()["hydra:member"]
+    assert domains, "No Mail.tm domains available"
+    domain = domains[0]["domain"]
+
+    local = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    address = f"{local}@{domain}"
+    password = "".join(random.choices(string.ascii_letters + string.digits, k=12))
+
+    r = requests.post(
+        f"{MAILTM_API}/accounts",
+        json={"address": address, "password": password}
+    )
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    r = requests.post(
+        f"{MAILTM_API}/token",
+        json={"address": address, "password": password}
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+
+    print(address)
+
+    yield {
+        "address": address,
+        "password": password,
+        "token": token,
+        "account_id": account_id
+    }
+
+    requests.delete(
+        f"{MAILTM_API}/accounts/{account_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+
+def test_send_reminder_and_check_inbox(
+    created_assessment,
+    created_action_item,
+    created_employee,
+    mailtm_account
+):
+    send_url = (
+        f"{API_HOST}/backend/v1/assessment/"
+        f"{created_assessment}/action-item/{created_action_item}/send-reminder"
+    )
+    r = requests.post(send_url,
+                      json={"employee_ids": [created_employee]},
+                      headers=HEADERS)
+    assert r.status_code == 200, r.text
+
+    headers = {"Authorization": f"Bearer {mailtm_account['token']}"}
+    messages = []
+    for _ in range(60):
+        r = requests.get(f"{MAILTM_API}/messages", headers=headers)
+        assert r.status_code in (200, 201), r.text
+        messages = r.json()["hydra:member"]
+        if messages:
+            break
+        time.sleep(1)
+
+    assert messages, "No messages received in Mail.tm inbox"
+
+    msg_id = messages[0]["id"]
+    r = requests.get(f"{MAILTM_API}/messages/{msg_id}", headers=headers)
+    assert r.status_code == 200, r.text
+    msg = r.json()
+
+    subject = msg.get("subject", "")
+    body_text = msg.get("text") or "".join(msg.get("html", []))
+
+    print("→ Received Mail.tm message:", subject)
+    print(body_text)
+

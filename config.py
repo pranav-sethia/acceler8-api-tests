@@ -14,3 +14,7 @@ if not AUTH_TOKEN:
 HEADERS = {
     "Authorization": f"Bearer {AUTH_TOKEN}",
 }
+
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+if not AUTH_TOKEN:
+    raise RuntimeError("ACCELER8_TOKEN not set in .env")
