@@ -3,7 +3,9 @@ import pytest
 import time
 import random
 import string
-from config import API_HOST, HEADERS, RAPIDAPI_KEY
+import io 
+from openpyxl import load_workbook
+from config import API_HOST, ORG_HEADERS as HEADERS, RAPIDAPI_KEY
 
 ASSESS_URL      = f"{API_HOST}/backend/v1/assessment"
 ASSESS_LIST_URL = f"{API_HOST}/backend/v1/assessments"
@@ -40,6 +42,7 @@ def created_assessment():
     r = requests.post(ASSESS_URL, json=body, headers=HEADERS)
     assert r.status_code == 200, r.text
     aid = r.json()["data"]["id"]
+    print(aid)
     yield aid
     requests.delete(f"{ASSESS_URL}/{aid}", headers=HEADERS)
 
@@ -307,3 +310,27 @@ def test_send_reminder_and_check_inbox(
     print("→ Received Mail.tm message:", subject)
     print(body_text)
 
+def test_download_action_item_responses(created_assessment, created_action_item):
+    url = (
+        f"{API_HOST}/backend/v1/assessment/"
+        f"{created_assessment}/action-item/{created_action_item}/responses/export"
+    )
+    r = requests.get(url, headers=HEADERS)
+    assert r.status_code == 200, r.text
+
+    wb = load_workbook(io.BytesIO(r.content), read_only=True, data_only=True)
+    ws = wb.active
+
+    assert ws.title == "B"
+
+    headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    assert headers == ["SN", "Employee Name", "Completed", "Q1: Question"]
+
+    found = None
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row[1] == "E1":
+            found = row
+            break
+
+    assert found is not None, "Row for employee 'E1' not found in export"
+    assert found[2] in ("Yes", "No")  

@@ -1,6 +1,6 @@
 import requests
 import pytest
-from config import API_HOST, HEADERS
+from config import API_HOST, ORG_HEADERS as HEADERS
 
 ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
 
@@ -29,7 +29,7 @@ def created_employee(created_assessment):
     url = f"{API_HOST}/backend/v1/assessment/{created_assessment}/employee"
 
     body = {
-        "email":                     "test_pranav",
+        "email":                     "test_pranav_email",
         "name":                      "E1",
         "position":                  "A",
         "title":                     "A",
@@ -39,7 +39,7 @@ def created_employee(created_assessment):
         "tenure":                    1,
         "years_to_retirement":       1,
         "manager": {
-            "email":                      "test_pranav_manager",
+            "email":                      "test_pranav_manager_email",
             "name":                       "A",
             "position":                   "A",
             "title":                      "A",

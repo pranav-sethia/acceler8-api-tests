@@ -1,6 +1,6 @@
 import requests
 import pytest
-from config import API_HOST, HEADERS
+from config import API_HOST, ORG_HEADERS as HEADERS
 
 ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
 ASSESS_LIST_URL  = f"{API_HOST}/backend/v1/assessments"
