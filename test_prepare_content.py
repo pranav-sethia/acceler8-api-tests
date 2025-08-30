@@ -1,8 +1,15 @@
 import requests
 import pytest
-from config import API_HOST, ORG_HEADERS as HEADERS
+import io
+from openpyxl import load_workbook
+from config import API_HOST, ORG_HEADERS as HEADERS, RAPIDAPI_KEY
 
 ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
+INBOXES_API = "https://inboxes-com.p.rapidapi.com"
+MAILTM_API = "https://api.mail.tm"
+
+
+INBOXES_API_TOKEN = RAPIDAPI_KEY
 
 
 @pytest.fixture(scope="module")
@@ -225,3 +232,66 @@ def test_delete_prepare_content(created_assessment):
 
     r2 = requests.get(f"{create_url}/{pid}", headers=HEADERS)
     assert r2.status_code in (403, 404)
+
+@pytest.fixture(scope="module")
+def mailtm_account():
+    r = requests.get(f"{MAILTM_API}/domains")
+    assert r.status_code == 200, r.text
+    domains = r.json()["hydra:member"]
+    assert domains, "No Mail.tm domains available"
+    domain = domains[0]["domain"]
+
+    local = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    address = f"{local}@{domain}"
+    password = "".join(random.choices(string.ascii_letters + string.digits, k=12))
+
+    r = requests.post(
+        f"{MAILTM_API}/accounts",
+        json={"address": address, "password": password}
+    )
+    assert r.status_code == 201, r.text
+    account_id = r.json()["id"]
+
+    r = requests.post(
+        f"{MAILTM_API}/token",
+        json={"address": address, "password": password}
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+
+    print(address)
+
+    yield {
+        "address": address,
+        "password": password,
+        "token": token,
+        "account_id": account_id
+    }
+
+    requests.delete(
+        f"{MAILTM_API}/accounts/{account_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+
+def test_download_action_item_responses(created_assessment, created_prepare_content):
+    url = (
+        f"{API_HOST}/backend/v1/assessment/"
+        f"{created_assessment}/prepare-content/{created_prepare_content}/responses/export"
+    )
+    r = requests.get(url, headers=HEADERS)
+    assert r.status_code == 200, r.text
+
+    wb = load_workbook(io.BytesIO(r.content), read_only=True, data_only=True)
+    ws = wb.active
+
+    headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    assert headers == ['SN', 'Employee Name', 'Completed', 'Q1: A']
+
+    found = None
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row[1] == "E1":
+            found = row
+            break
+
+    assert found == (1.0, 'E1', 'No', '')

@@ -307,9 +307,6 @@ def test_send_reminder_and_check_inbox(
     subject = msg.get("subject", "")
     body_text = msg.get("text") or "".join(msg.get("html", []))
 
-    print("→ Received Mail.tm message:", subject)
-    print(body_text)
-
 def test_download_action_item_responses(created_assessment, created_action_item):
     url = (
         f"{API_HOST}/backend/v1/assessment/"
