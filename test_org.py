@@ -17,6 +17,7 @@ def created_org():
     response = requests.post(BASE_URL, json=body, headers=HEADERS)
     assert response.status_code == 200, f"Request failed: {json.dumps(response.json(), indent=2)}"
     org_id = response.json()["data"]["id"]
+
     yield org_id
     requests.delete(f"{BASE_URL}/{org_id}", headers=HEADERS)
 
