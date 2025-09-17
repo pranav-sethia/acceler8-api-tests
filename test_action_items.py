@@ -331,3 +331,34 @@ def test_download_action_item_responses(created_assessment, created_action_item)
 
     assert found is not None, "Row for employee 'E1' not found in export"
     assert found[2] in ("Yes", "No")  
+
+def test_employee_can_view_and_submit_action_item(created_assessment, created_action_item, created_employee):
+    base_url = f"{API_HOST}/backend/v1/assessment/{created_assessment}/employee/{created_employee}"
+
+    list_url = f"{base_url}/action-items"
+    r_list = requests.get(list_url, headers=HEADERS)
+    assert r_list.status_code == 200
+    action_item_ids = [item['id'] for item in r_list.json()['data']]
+    assert created_action_item in action_item_ids
+
+    details_url = f"{base_url}/action-item/{created_action_item}"
+    r_details = requests.get(details_url, headers=HEADERS)
+    assert r_details.status_code == 200
+    assert r_details.json()['data']['id'] == created_action_item
+
+    submit_body = {
+        "response": [
+            {
+                "quiz_id": "0",
+                "quiz_type": "SUBJECTIVE",
+                "answer": "This is my answer from the automated test.",
+                "options": []
+            }
+        ],
+        "completed": True
+    }
+    
+    submit_url = f"{details_url}/submit"
+    r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
+    
+    assert r_submit.status_code == 200, r_submit.text

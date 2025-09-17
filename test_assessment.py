@@ -64,3 +64,22 @@ def test_delete_assessment():
     response2 = requests.get(f"{ASSESS_URL}/{aid}", headers=HEADERS)
     assert response2.status_code in (404, 403)
 
+def test_create_assessment_with_missing_name():
+    invalid_body = {
+        # "name" is missing
+        "capabilities":     ["TECHNICAL SKILLS 1"],
+        "show_onboarding":  False,
+        "assessment_type":  "EMPLOYEE"
+    }
+    response = requests.post(ASSESS_URL, json=invalid_body, headers=HEADERS)
+    assert response.status_code == 400
+
+def test_get_assessment_summary(created_assessment):
+    summary_url = f"{ASSESS_URL}/{created_assessment}/summary"
+    response = requests.get(summary_url, headers=HEADERS)
+    
+    assert response.status_code == 200, response.text
+    
+    summary_data = response.json()["data"]
+    assert summary_data['total_employee_count'] == 0
+    assert summary_data['self_assessment_completed_count'] == 0

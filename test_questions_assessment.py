@@ -6,7 +6,7 @@ ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
 ASSESS_LIST_URL  = f"{API_HOST}/backend/v1/assessments"
 
 @pytest.fixture(scope="module")
-def created_assessment(): # ONE ASSESSMENT TO ATTACH QUESTION TO
+def created_assessment(): 
     body = {
         "capabilities":    ["TECHNICAL SKILLS 1"],
         "name":            "Test assessment questions API",
@@ -218,3 +218,53 @@ def test_bulk_create_update_and_delete(created_assessment):
 
     rd = requests.get(get_q(q_delete_id), headers=HEADERS)
     assert rd.status_code in (403, 404)
+
+def test_create_assessment_fails_with_empty_capabilities():
+    body = {
+        "capabilities":    [], 
+        "name":            "Test with empty capabilities",
+        "show_onboarding": False,
+        "assessment_type": "EMPLOYEE"
+    }
+    
+    r_create = requests.post(ASSESS_URL, json=body, headers=HEADERS)
+    
+    assert r_create.status_code == 404
+
+def test_arrange_subcapabilities_sequence(created_assessment):
+    base_url = f"{ASSESS_URL}/{created_assessment}"
+    create_q_url = f"{base_url}/question"
+    arrange_url = f"{base_url}/success-capabilities/update-sequence"
+
+    q1_body = {
+        "capabilities": "First Cap", "sub_capability": "A", "capabilities_label": "First Cap Label",
+        "type": "OBJECTIVE_SINGLE", "question": "Q1", "options": [{"value": "A", "input_required": False}],
+        "ranking": [1], "sl_no": 1, "capabilities_sl_no": 1, "manager_question_type": "OBJECTIVE_SINGLE",
+        "manager_question": "Manager Q1", "manager_options": [{"value": "A", "input_required": False}], "manager_ranking": [1]
+    }
+    q2_body = {
+        "capabilities": "Second Cap", "sub_capability": "B", "capabilities_label": "Second Cap Label",
+        "type": "OBJECTIVE_SINGLE", "question": "Q2", "options": [{"value": "B", "input_required": False}],
+        "ranking": [1], "sl_no": 2, "capabilities_sl_no": 2, "manager_question_type": "OBJECTIVE_SINGLE",
+        "manager_question": "Manager Q2", "manager_options": [{"value": "B", "input_required": False}], "manager_ranking": [1]
+    }
+    requests.post(create_q_url, json=q1_body, headers=HEADERS).raise_for_status()
+    requests.post(create_q_url, json=q2_body, headers=HEADERS).raise_for_status()
+    
+    list_url = f"{base_url}/questions"
+    r_list = requests.get(list_url, headers=HEADERS)
+    r_list.raise_for_status()
+    questions = r_list.json()
+
+    all_capabilities = list(dict.fromkeys(q['capabilities'] for q in questions))
+
+    new_sequence_body = list(reversed(all_capabilities))
+
+    r_arrange = requests.post(arrange_url, json=new_sequence_body, headers=HEADERS)
+    assert r_arrange.status_code == 200, r_arrange.text
+
+    r_final_list = requests.get(list_url, headers=HEADERS)
+    final_questions = r_final_list.json()
+    final_capabilities_order = list(dict.fromkeys(q['capabilities'] for q in final_questions))
+
+    assert final_capabilities_order == new_sequence_body

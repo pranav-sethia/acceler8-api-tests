@@ -1,6 +1,9 @@
 import requests
 import pytest
 import io
+import time
+import random
+import string
 from openpyxl import load_workbook
 from config import API_HOST, ORG_HEADERS as HEADERS, RAPIDAPI_KEY
 
@@ -295,3 +298,69 @@ def test_download_action_item_responses(created_assessment, created_prepare_cont
             break
 
     assert found == (1.0, 'E1', 'No', '')
+
+def test_employee_can_view_and_submit_prepare_content(created_assessment, created_prepare_content, created_employee):
+    base_url = f"{ASSESS_URL}/{created_assessment}/employee/{created_employee}"
+
+    list_url = f"{base_url}/prepare-contents"
+    r_list = requests.get(list_url, headers=HEADERS)
+    assert r_list.status_code == 200
+    content_ids = [item['id'] for item in r_list.json()['data']]
+    assert created_prepare_content in content_ids
+
+    details_url = f"{base_url}/prepare-content/{created_prepare_content}"
+    r_details = requests.get(details_url, headers=HEADERS)
+    assert r_details.status_code == 200
+    assert r_details.json()['data']['id'] == created_prepare_content
+
+    submit_url = f"{details_url}/submit"
+    submit_body = {
+        "response": [{
+            "quiz_id": "0",
+            "quiz_type": "SUBJECTIVE",
+            "answer": "Employee response to prepare content quiz.",
+            "options": []
+        }],
+        "completed": True
+    }
+    r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
+    assert r_submit.status_code == 200, r_submit.text
+
+
+
+def test_send_reminder_and_check_inbox(created_assessment, created_prepare_content, mailtm_account):
+    create_emp_url = f"{ASSESS_URL}/{created_assessment}/employee"
+    employee_email = mailtm_account["address"]
+
+    emp_body = {
+        "email": employee_email,
+        "name": "Reminder Recipient",
+        "position": "Test Position",
+        "title": "Test Title",
+        "join_date": "2025-01-01",
+        "manager": {
+            "email": f"reminder.manager@example.com",
+            "name": "Reminder Manager"
+        }
+    }
+    
+    r_emp = requests.post(create_emp_url, json=emp_body, headers=HEADERS)
+    assert r_emp.status_code == 201, r_emp.text # This should now pass
+    employee_id = r_emp.json()["data"]["id"]
+
+    reminder_url = f"{ASSESS_URL}/{created_assessment}/prepare-content/{created_prepare_content}/send-reminder"
+    reminder_body = { "employee_ids": [employee_id] }
+    r_remind = requests.post(reminder_url, json=reminder_body, headers=HEADERS)
+    assert r_remind.status_code == 200
+
+    headers = {"Authorization": f"Bearer {mailtm_account['token']}"}
+    messages = []
+    for _ in range(60): 
+        r_mail = requests.get(f"{MAILTM_API}/messages", headers=headers)
+        assert r_mail.status_code in (200, 201)
+        messages = r_mail.json()["hydra:member"]
+        if messages:
+            break
+        time.sleep(1)
+
+    assert messages, "Reminder email was not received in the inbox"

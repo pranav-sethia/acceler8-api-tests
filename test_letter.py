@@ -4,6 +4,7 @@ import time
 import random
 import string
 import io
+import json
 from openpyxl import load_workbook
 from config import API_HOST, ORG_HEADERS as HEADERS, RAPIDAPI_KEY
 
@@ -191,27 +192,12 @@ def test_list_letters(created_assessment, created_letter_template):
     assert isinstance(letters, list)
 
 
-def test_send_letter_notification(created_assessment, created_employee, created_letter_template):
-    """Test sending letter notification to employees."""
-    body = {
-        "employee_ids": [created_employee]
-    }
-    
-    url = f"{LETTER_TEMPLATE_URL}/{created_assessment}/letter/notify"
-    r = requests.post(url, json=body, headers=HEADERS)
-    assert r.status_code == 200, r.text
-    
-    data = r.json()
-    assert "data" in data or "message" in data
-
-
 def test_send_letter_notification_and_check_inbox(
     created_assessment, 
     created_employee, 
     created_letter_template,
     mailtm_account
 ):
-    """Test sending letter notification and verify email receipt."""
     body = {
         "employee_ids": [created_employee]
     }
@@ -344,3 +330,32 @@ def test_letter_pagination(created_assessment, created_letter_template):
         letters = page["data"]
         
         assert len(letters) <= page_size, f"Expected max {page_size} items, got {len(letters)}"
+
+def test_employee_can_view_and_submit_letter(created_assessment, created_employee, created_letter_template):
+    base_url = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
+
+    template_url = f"{base_url}/letter/template"
+    r_template = requests.get(template_url, headers=HEADERS)
+    assert r_template.status_code == 200
+    assert "reason_for_joining" in r_template.json()["data"]
+    
+    submit_url = f"{base_url}/employee/{created_employee}/letter"
+    submit_body = {
+        "content": {
+            "0": "My goal for the next 10 days...",
+            "1": "I will start...",
+            "2": "I will stop...",
+            "3": "I will continue...",
+            "4": "I want to show up as a leader who...",
+            "5": "The moments I want to create are...",
+            "6": "My Signature"
+        }
+    }
+    r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
+    assert r_submit.status_code == 200, r_submit.text
+    
+    r_verify = requests.get(submit_url, headers=HEADERS)
+    assert r_verify.status_code == 200
+    
+    data = r_verify.json()["data"]
+    assert data["letter_submitted"] is True
