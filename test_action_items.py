@@ -362,3 +362,77 @@ def test_employee_can_view_and_submit_action_item(created_assessment, created_ac
     r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
     
     assert r_submit.status_code == 200, r_submit.text
+
+
+@pytest.fixture(scope="module")
+def action_item_with_varied_statuses(created_assessment, created_organisation):
+    """
+    Sets up an action item with two employees: one who has completed it and one who has not.
+    """
+    # 1. Create the Action Item with a complete and valid body
+    create_url = f"{ASSESS_URL}/{created_assessment}/action-item"
+    action_item_body = {
+        "title": "Status Test Action Item",
+        "embed_items": [{"id": 1, "type": "TEXT", "content": ""}],
+        "send_to_all": True,
+        "send_date": "2025-01-01",
+        "send_time": "10:00:00",
+        "timezone": "Asia/Calcutta",
+        "organisation_id": created_organisation,
+        "quizzes": [{"id": "0", "type": "SUBJECTIVE", "question": "Status Q?"}]
+    }
+    r_ai = requests.post(create_url, json=action_item_body, headers=HEADERS)
+    assert r_ai.status_code == 200, f"Failed to create action item: {r_ai.text}"
+    action_item_id = r_ai.json()["data"]["id"]
+
+    # 2. Create two employees
+    employees = {}
+    for status in ["DONE", "NOT_DONE"]:
+        rand_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
+        emp_body = {
+            "email": f"ai_status_{status.lower()}_{rand_suffix}@example.com",
+            "name": f"Employee {status}",
+            "manager": {"email": f"ai_mgr_{rand_suffix}@example.com", "name": "AI Manager"}
+        }
+        r_emp = requests.post(f"{ASSESS_URL}/{created_assessment}/employee", json=emp_body, headers=HEADERS)
+        assert r_emp.status_code == 201, f"Failed to create employee: {r_emp.text}"
+        employees[status] = {"id": r_emp.json()["data"]["id"], "name": emp_body["name"]}
+    
+    # 3. Submit the action item for the "DONE" employee
+    done_employee_id = employees["DONE"]["id"]
+    submit_url = f"{ASSESS_URL}/{created_assessment}/employee/{done_employee_id}/action-item/{action_item_id}/submit"
+    submit_body = {
+        "response": [{"quiz_id": "0", "answer": "Done"}],
+        "completed": True
+    }
+    r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
+    assert r_submit.status_code == 200, f"Failed to submit response: {r_submit.text}"
+
+    time.sleep(1)
+
+    yield {"assessment_id": created_assessment, "action_item_id": action_item_id, "employees": employees}
+
+
+def test_admin_can_see_action_item_status(action_item_with_varied_statuses):
+    """
+    Tests that an admin can see the correct completion status for an action item.
+    """
+    assessment_id = action_item_with_varied_statuses["assessment_id"]
+    action_item_id = action_item_with_varied_statuses["action_item_id"]
+    employees = action_item_with_varied_statuses["employees"]
+    done_employee_id = employees["DONE"]["id"]
+    not_done_employee_id = employees["NOT_DONE"]["id"]
+    
+    details_url = f"{ASSESS_URL}/{assessment_id}/action-item/{action_item_id}"
+    r_details = requests.get(details_url, headers=HEADERS)
+    assert r_details.status_code == 200
+    
+    action_item_data = r_details.json()["data"]
+    
+    status_map = {
+        recipient["id"]: recipient.get("is_completed", False) 
+        for recipient in action_item_data.get("recipients", [])
+    }
+    
+    assert status_map.get(done_employee_id) is True
+    assert status_map.get(not_done_employee_id) is False

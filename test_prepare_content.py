@@ -5,6 +5,7 @@ import time
 import random
 import string
 from openpyxl import load_workbook
+from datetime import datetime, timedelta, timezone
 from config import API_HOST, ORG_HEADERS as HEADERS, RAPIDAPI_KEY
 
 ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
@@ -14,6 +15,20 @@ MAILTM_API = "https://api.mail.tm"
 
 INBOXES_API_TOKEN = RAPIDAPI_KEY
 
+@pytest.fixture(scope="module")
+def created_organisation():
+    """Create an organization for testing."""
+    body = {
+        "internal_name": f"PrepContentOrg{random.randint(1000,9999)}",
+        "name": "Prepare Content Org",
+        "colour_theme": "DRIVEN_RED"
+    }
+    url = f"{API_HOST}/backend/v1/organisation"
+    r = requests.post(url, json=body, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    oid = r.json()["data"]["id"]
+    yield oid
+    requests.delete(f"{url}/{oid}", headers=HEADERS)
 
 @pytest.fixture(scope="module")
 def created_assessment():
@@ -364,3 +379,182 @@ def test_send_reminder_and_check_inbox(created_assessment, created_prepare_conte
         time.sleep(1)
 
     assert messages, "Reminder email was not received in the inbox"
+
+
+@pytest.fixture(scope="module")
+def prepare_content_with_varied_statuses(created_assessment):
+    assessment_id = created_assessment
+    
+    create_url = f"{ASSESS_URL}/{assessment_id}/prepare-content"
+    pc_body = {
+        "title": "Status Test Content", "send_to_all": True, "send_date": "2025-01-01", "send_time": "12:00",
+        "organisation_id": HEADERS.get("organisation_id"),
+        "quizzes": [{"id": 0, "type": "SUBJECTIVE", "question": "Status Q?"}]
+    }
+    r_pc = requests.post(create_url, json=pc_body, headers=HEADERS)
+    assert r_pc.status_code == 200
+    prepare_content_id = r_pc.json()["data"]["id"]
+
+    employees = {}
+    for status in ["NOT_DONE", "DONE"]:
+        rand_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
+        emp_body = {
+            "email": f"pc_status_{status.lower()}_{rand_suffix}@example.com", "name": f"Employee {status}",
+            "manager": {"email": f"pc_mgr_{rand_suffix}@example.com", "name": "PC Manager"}
+        }
+        r_emp = requests.post(f"{ASSESS_URL}/{assessment_id}/employee", json=emp_body, headers=HEADERS)
+        assert r_emp.status_code == 201
+        employees[status] = {"id": r_emp.json()["data"]["id"], "name": emp_body["name"]}
+
+    done_employee_id = employees["DONE"]["id"]
+    submit_url = f"{ASSESS_URL}/{assessment_id}/employee/{done_employee_id}/prepare-content/{prepare_content_id}/submit"
+    submit_body = {"response": [{"quiz_id": "0", "answer": "Done"}], "completed": 'true'}
+    r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
+    assert r_submit.status_code == 200
+
+    publish_url = f"{ASSESS_URL}/{assessment_id}/result/visibility"
+    publish_body = {"result_visibility": "MANAGER_AND_EMPLOYEE"}
+    r_publish = requests.put(publish_url, json=publish_body, headers=HEADERS)
+    assert r_publish.status_code == 200, f"Failed to publish result: {r_publish.text}"
+
+    verify_url = f"{ASSESS_URL}/{assessment_id}/employee/{done_employee_id}/verify"
+    r_verify = requests.post(verify_url, headers=HEADERS)
+    assert r_verify.status_code == 200, f"Failed to verify employee: {r_verify.text}"
+
+    time.sleep(2) 
+
+    yield {"assessment_id": assessment_id, "employees": employees}
+
+
+def test_admin_can_see_prepare_content_status(prepare_content_with_varied_statuses):
+    """
+    Tests that the admin can see the correct completion status by checking
+    the 'uncompleted_recipients' list in the prepare-content details.
+    """
+    assessment_id = prepare_content_with_varied_statuses["assessment_id"]
+    employees = prepare_content_with_varied_statuses["employees"]
+    done_employee_id = employees["DONE"]["id"]
+    not_done_employee_id = employees["NOT_DONE"]["id"]
+    
+    list_url = f"{ASSESS_URL}/{assessment_id}/prepare-contents"
+    r_list = requests.get(list_url, headers=HEADERS)
+    assert r_list.status_code == 200, r_list.text
+    
+    prepare_content_data = None
+    for item in r_list.json()["data"]:
+        if item.get("title") == "Status Test Content":
+            prepare_content_data = item
+            break
+            
+    assert prepare_content_data is not None, "Could not find the test prepare-content item."
+    assert prepare_content_data.get("completed_count") == 1
+    
+    uncompleted_ids = [
+        recipient["id"] for recipient in prepare_content_data.get("uncompleted_recipients", [])
+    ]
+    
+    assert done_employee_id not in uncompleted_ids
+    assert not_done_employee_id in uncompleted_ids
+
+
+def test_send_prepare_content_reminder_and_check_inbox(created_assessment, created_prepare_content, mailtm_account):
+    """
+    Tests the end-to-end flow of sending a reminder and verifying
+    that the email is received in an inbox.
+    """
+    employee_email = mailtm_account["address"]
+    emp_body = {
+        "email": employee_email,
+        "name": "Reminder Recipient",
+        "manager": {"email": "reminder.mgr@example.com", "name": "Reminder Manager"}
+    }
+    r_emp = requests.post(f"{ASSESS_URL}/{created_assessment}/employee", json=emp_body, headers=HEADERS)
+    assert r_emp.status_code == 201
+    employee_id = r_emp.json()["data"]["id"]
+
+    reminder_url = f"{ASSESS_URL}/{created_assessment}/prepare-content/{created_prepare_content}/send-reminder"
+    reminder_body = {"employee_ids": [employee_id]}
+    r_remind = requests.post(reminder_url, json=reminder_body, headers=HEADERS)
+    assert r_remind.status_code == 200
+
+    headers = {"Authorization": f"Bearer {mailtm_account['token']}"}
+    messages = []
+    for _ in range(60): 
+        r_mail = requests.get(f"https://api.mail.tm/messages", headers=headers)
+        assert r_mail.status_code in (200, 201)
+        messages = r_mail.json()["hydra:member"]
+        if messages:
+            break
+        time.sleep(1)
+
+    assert messages, "Reminder email was not received in the inbox"
+
+
+def test_new_employee_is_assigned_to_existing_content(created_assessment, created_organisation):
+    """
+    Covers: Check after add employee, will show in existing prepare content
+    """
+    create_url = f"{ASSESS_URL}/{created_assessment}/prepare-content"
+    pc_body = {
+        "title": "Existing Content for New Hires",
+        "embed_items": [{"id": 1, "type": "TEXT", "content": ""}],
+        "send_to_all": True,
+        "send_date": "2024-01-01",
+        "send_time": "12:00:00",
+        "timezone": "Asia/Calcutta",
+        "organisation_id": created_organisation
+    }
+    r_pc = requests.post(create_url, json=pc_body, headers=HEADERS)
+    assert r_pc.status_code == 200, f"Failed to create prepare content: {r_pc.text}"
+    prepare_content_id = r_pc.json()["data"]["id"]
+
+    rand_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
+    emp_body = {
+        "email": f"new_hire_{rand_suffix}@example.com", "name": "New Hire",
+        "manager": {"email": f"new_hire_mgr_{rand_suffix}@example.com", "name": "Hiring Manager"}
+    }
+    r_emp = requests.post(f"{ASSESS_URL}/{created_assessment}/employee", json=emp_body, headers=HEADERS)
+    assert r_emp.status_code == 201, f"Failed to create employee: {r_emp.text}"
+    employee_id = r_emp.json()["data"]["id"]
+
+    list_url = f"{ASSESS_URL}/{created_assessment}/employee/{employee_id}/prepare-contents"
+    r_list = requests.get(list_url, headers=HEADERS)
+    assert r_list.status_code == 200
+    content_ids = [item['id'] for item in r_list.json()['data']]
+    assert prepare_content_id in content_ids
+
+
+def test_prepare_content_scheduling(created_assessment, created_organisation, created_employee):
+    """
+    Covers: Prepare Content is available after the Schedule AND
+            Prepare content is hidden Before the Schedule
+    """
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
+    past_content_body = {
+        "title": "Past Content", "send_to_all": True, "send_date": yesterday,
+        "organisation_id": created_organisation,
+        "embed_items": [{"id": 1, "type": "TEXT", "content": ""}],
+        "send_time": "12:00:00", "timezone": "Asia/Calcutta"
+    }
+    r_past = requests.post(f"{ASSESS_URL}/{created_assessment}/prepare-content", json=past_content_body, headers=HEADERS)
+    assert r_past.status_code == 200, f"Failed to create past content: {r_past.text}"
+    past_content_id = r_past.json()["data"]["id"]
+
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%d')
+    future_content_body = {
+        "title": "Future Content", "send_to_all": True, "send_date": tomorrow,
+        "organisation_id": created_organisation,
+        "embed_items": [{"id": 1, "type": "TEXT", "content": ""}],
+        "send_time": "12:00:00", "timezone": "Asia/Calcutta"
+    }
+    r_future = requests.post(f"{ASSESS_URL}/{created_assessment}/prepare-content", json=future_content_body, headers=HEADERS)
+    assert r_future.status_code == 200, f"Failed to create future content: {r_future.text}"
+    future_content_id = r_future.json()["data"]["id"]
+    
+    list_url = f"{ASSESS_URL}/{created_assessment}/employee/{created_employee}/prepare-contents"
+    r_list = requests.get(list_url, headers=HEADERS)
+    assert r_list.status_code == 200
+    visible_content_ids = [item['id'] for item in r_list.json()['data']]
+
+    assert past_content_id in visible_content_ids
+    assert future_content_id not in visible_content_ids

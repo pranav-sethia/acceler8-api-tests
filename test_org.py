@@ -1,6 +1,7 @@
 import requests
 import pytest
 import json
+import random
 
 from config import API_HOST, HEADERS
 
@@ -55,3 +56,37 @@ def test_delete_org():
 
     get_res = requests.get(f"{BASE_URL}/{org_id}", headers=HEADERS)
     assert get_res.status_code == 404
+
+
+def test_create_org_with_same_internal_and_external_name():
+    unique_name = f"Identical-Name-Test-{random.randint(1000, 9999)}"
+    body = {
+        "internal_name": unique_name,
+        "name": unique_name,
+        "colour_theme": "DRIVEN_RED",
+        "logo": "comet.jpg"
+    }
+    
+    org_id = None
+    try:
+        r_create = requests.post(BASE_URL, json=body, headers=HEADERS)
+        assert r_create.status_code == 200, f"Creation failed: {r_create.text}"
+        org_id = r_create.json()["data"]["id"]
+
+        r_get = requests.get(f"{BASE_URL}/{org_id}", headers=HEADERS)
+        assert r_get.status_code == 200
+        assert r_get.json()["data"]["name"] == unique_name
+    finally:
+        if org_id:
+            requests.delete(f"{BASE_URL}/{org_id}", headers=HEADERS)
+
+
+def test_create_org_fails_with_empty_name():
+    body = {
+        "internal_name": "Test Internal Name",
+        "name": "",
+        "colour_theme": "DRIVEN_RED",
+        "logo": "comet.jpg"
+    }
+    response = requests.post(BASE_URL, json=body, headers=HEADERS)
+    assert response.status_code == 400

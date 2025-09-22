@@ -85,3 +85,37 @@ def test_send_onboarding_email(created_assessment):
     email_url = f"{ASSESS_URL}/{created_assessment}/onboarding/email"
     r_email = requests.post(email_url, headers=HEADERS)
     assert r_email.status_code == 200, r_email.text
+
+
+def test_admin_can_edit_onboarding_content(created_assessment):
+    """
+    Tests that an admin can update an existing onboarding configuration.
+    """
+    onboarding_url = f"{ASSESS_URL}/{created_assessment}/onboarding/home"
+
+    setup_body = {
+        "program_name": "Initial Program Name",
+        "service_personalization": [{"service": "LETTER_TO_YOURSELF", "position": 0}],
+        "number_of_days": 30
+    }
+    r_setup = requests.post(onboarding_url, json=setup_body, headers=HEADERS)
+    assert r_setup.status_code == 200, f"Onboarding setup failed: {r_setup.text}"
+
+    update_body = {
+        "program_name": "Updated Program Name",
+        "service_personalization": [
+            {"service": "LETTER_TO_YOURSELF", "position": 0},
+            {"service": "PREPARE", "position": 1}
+        ],
+        "number_of_days": 45
+    }
+    r_update = requests.post(onboarding_url, json=update_body, headers=HEADERS)
+    assert r_update.status_code == 200, f"Onboarding update failed: {r_update.text}"
+
+    r_get = requests.get(onboarding_url, headers=HEADERS)
+    assert r_get.status_code == 200
+    updated_data = r_get.json()["data"]
+
+    assert updated_data["program_name"] == "Updated Program Name"
+    assert updated_data["number_of_days"] == 45
+    assert len(updated_data["service_personalization"]) == 2
