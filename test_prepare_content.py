@@ -1,3 +1,7 @@
+"""
+Prepare content tests
+Tests pre-assessment learning materials and scheduling
+"""
 import requests
 import pytest
 import io
@@ -17,7 +21,7 @@ INBOXES_API_TOKEN = RAPIDAPI_KEY
 
 @pytest.fixture(scope="module")
 def created_organisation():
-    """Create an organization for testing."""
+    """Create an organization for prepare content tests"""
     body = {
         "internal_name": f"PrepContentOrg{random.randint(1000,9999)}",
         "name": "Prepare Content Org",
@@ -28,11 +32,12 @@ def created_organisation():
     assert r.status_code == 200, r.text
     oid = r.json()["data"]["id"]
     yield oid
+    # Cleanup: delete organization after tests
     requests.delete(f"{url}/{oid}", headers=HEADERS)
 
 @pytest.fixture(scope="module")
 def created_assessment():
-    """Create one assessment under which we’ll attach prepare-content."""
+    """Create an assessment for prepare content tests"""
     body = {
         "capabilities":    ["TECHNICAL SKILLS 1"],
         "name":            "Test assessment for prepare-content",
@@ -43,14 +48,13 @@ def created_assessment():
     assert r.status_code == 200, r.text
     aid = r.json()["data"]["id"]
     yield aid
+    # Cleanup: delete assessment after tests
     requests.delete(f"{ASSESS_URL}/{aid}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def created_employee(created_assessment):
-    """
-    Add a real employee so that prepare-content endpoints will accept our requests.
-    """
+    """Create an employee for prepare content tests"""
     url = f"{API_HOST}/backend/v1/assessment/{created_assessment}/employee"
 
     body = {
@@ -90,14 +94,13 @@ def created_employee(created_assessment):
     assert r.status_code == 201, r.text
     eid = r.json()["data"]["id"]
     yield eid
+    # Cleanup: delete employee after tests
     requests.delete(f"{url}/{eid}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def created_prepare_content(created_assessment, created_employee):
-    """
-    Create one prepare-content, now that the assessment has at least one employee.
-    """
+    """Create a prepare content item for testing"""
     base       = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     create_url = f"{base}/prepare-content"
 
@@ -137,13 +140,12 @@ def created_prepare_content(created_assessment, created_employee):
     pc_id = r.json()["data"]["id"]
     yield pc_id
 
+    # Cleanup: delete prepare content after tests
     requests.delete(f"{create_url}/{pc_id}", headers=HEADERS)
 
 
 def test_list_prepare_contents(created_assessment, created_prepare_content):
-    """
-    GET /assessment/:aid/prepare-contents should include our new item.
-    """
+    """Test listing prepare content items"""
     url = f"{API_HOST}/backend/v1/assessment/{created_assessment}/prepare-contents"
     r = requests.get(url, headers=HEADERS)
     assert r.status_code == 200
@@ -153,9 +155,7 @@ def test_list_prepare_contents(created_assessment, created_prepare_content):
 
 
 def test_get_prepare_content_details(created_assessment, created_prepare_content):
-    """
-    GET /assessment/:aid/prepare-content/:pcId returns the correct object.
-    """
+    """Test retrieving prepare content details"""
     url = (
         f"{API_HOST}/backend/v1/assessment/"
         f"{created_assessment}/prepare-content/{created_prepare_content}"
@@ -168,14 +168,12 @@ def test_get_prepare_content_details(created_assessment, created_prepare_content
 
 
 def test_update_prepare_content(created_assessment, created_prepare_content):
-    """
-    PUT /assessment/:aid/prepare-content/:pcId with the exact update body.
-    """
+    """Test updating prepare content"""
     base       = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     update_url = f"{base}/prepare-content/{created_prepare_content}"
 
     body = {
-        "title": "B",
+        "title": "B",  # Updated title
         "embed_items": [
             {
                 "id": 1,
@@ -208,18 +206,18 @@ def test_update_prepare_content(created_assessment, created_prepare_content):
     r = requests.put(update_url, json=body, headers=HEADERS)
     assert r.status_code == 200, r.text
 
+    # Verify the update worked
     r2 = requests.get(update_url, headers=HEADERS)
     assert r2.status_code == 200
     assert r2.json()["data"]["title"] == "B"
 
 
 def test_delete_prepare_content(created_assessment):
-    """
-    Create a disposable prepare-content and then delete it.
-    """
+    """Test deleting prepare content"""
     base       = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
     create_url = f"{base}/prepare-content"
 
+    # Create a temporary prepare content item
     body = {
         "title": "To delete",
         "embed_items": [
@@ -245,9 +243,11 @@ def test_delete_prepare_content(created_assessment):
     assert r0.status_code == 200, r0.text
     pid = r0.json()["data"]["id"]
 
+    # Delete the item
     r1 = requests.delete(f"{create_url}/{pid}", headers=HEADERS)
     assert r1.status_code in (200, 204)
 
+    # Verify it's gone
     r2 = requests.get(f"{create_url}/{pid}", headers=HEADERS)
     assert r2.status_code in (403, 404)
 

@@ -1,3 +1,7 @@
+"""
+Employee management tests
+Tests employee lifecycle, file uploads, and assessment workflows
+"""
 import requests
 import pytest
 import random
@@ -15,6 +19,7 @@ BASE_URL = f"{API_HOST}/backend/v1"
 
 @pytest.fixture(scope="module")
 def created_organisation():
+    """Create a test organization for employee tests"""
     body = {
         "internal_name": f"TestAutoOrg{''.join(random.choices(string.digits, k=4))}",
         "name": "Test Employee Org",
@@ -28,10 +33,12 @@ def created_organisation():
     
     yield oid
     
+    # Cleanup: delete organization after tests
     requests.delete(f"{url}/{oid}", headers=HEADERS)
 
 @pytest.fixture(scope="module")
 def created_assessment(created_organisation):
+    """Create a test assessment for employee tests"""
     body = {
         "organisation_id": created_organisation,
         "capabilities": ["TECHNICAL SKILLS 1"],
@@ -46,10 +53,12 @@ def created_assessment(created_organisation):
     
     yield aid
     
+    # Cleanup: delete assessment after tests
     requests.delete(f"{url}/{aid}", headers=HEADERS)
 
 @pytest.fixture(scope="module")
 def created_employee(created_assessment):
+    """Create a test employee with manager for testing"""
     rand_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
     employee_email = f"emp+{rand_suffix}@example.com"
     manager_email = f"mgr+{rand_suffix}@example.com"
@@ -79,9 +88,11 @@ def created_employee(created_assessment):
         "manager_id": manager_id
     }
     
+    # Cleanup: delete employee after tests
     requests.delete(f"{BASE_URL}/employee/{employee_id}", headers=HEADERS)
 
 def test_upload_employee_assessment_file(created_assessment):
+    """Test uploading employee data via Excel file"""
     file_path = "copy.xlsx" 
 
     if not os.path.exists(file_path):
@@ -103,6 +114,7 @@ def test_upload_employee_assessment_file(created_assessment):
     assert r.json()["message"] == "success"
 
 def test_get_assessment_employees_pagination(created_assessment, created_employee):
+    """Test paginated employee listing for assessment"""
     url = f"{BASE_URL}/assessment/{created_assessment}/employees?page=1&size=10"
     r = requests.get(url, headers=HEADERS)
     
@@ -115,6 +127,7 @@ def test_get_assessment_employees_pagination(created_assessment, created_employe
     assert created_employee["employee_id"] in employee_ids
 
 def test_update_assessment_employee(created_assessment, created_employee):
+    """Test updating employee information"""
     employee_id = created_employee["employee_id"]
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/{employee_id}"
     
@@ -126,6 +139,7 @@ def test_update_assessment_employee(created_assessment, created_employee):
     r_put = requests.put(url, json=update_body, headers=HEADERS)
     assert r_put.status_code == 200, r_put.text
     
+    # Verify the update worked
     r_get = requests.get(f"{BASE_URL}/employee/{employee_id}", headers=HEADERS)
     assert r_get.status_code == 200, r_get.text
     
@@ -134,6 +148,7 @@ def test_update_assessment_employee(created_assessment, created_employee):
     assert updated_data["position"] == "Senior Analyst"
 
 def test_get_employee_by_code(created_assessment, created_employee):
+    """Test finding employee by unique code"""
     employee_code = created_employee["employee_code"]
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/by_code?code={employee_code}"
     r = requests.get(url, headers=HEADERS)
@@ -144,6 +159,7 @@ def test_get_employee_by_code(created_assessment, created_employee):
     assert data["employee_code"] == employee_code
 
 def test_get_employee_by_id(created_employee):
+    """Test retrieving employee by ID"""
     employee_id = created_employee["employee_id"]
     url = f"{BASE_URL}/employee/{employee_id}"
     r = requests.get(url, headers=HEADERS)
@@ -152,6 +168,7 @@ def test_get_employee_by_id(created_employee):
     assert r.json()["data"]["id"] == employee_id
 
 def test_verify_employee_assessment(created_assessment, created_employee):
+    """Test employee assessment verification"""
     employee_id = created_employee["employee_id"]
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/{employee_id}/verify"
     
@@ -161,6 +178,7 @@ def test_verify_employee_assessment(created_assessment, created_employee):
     assert r.json()["message"] == "success"
 
 def test_get_employee_assessments(created_employee, created_assessment):
+    """Test getting all assessments for an employee"""
     employee_id = created_employee["employee_id"]
     url = f"{BASE_URL}/employee/{employee_id}/assessments"
     r = requests.get(url, headers={})
@@ -172,6 +190,7 @@ def test_get_employee_assessments(created_employee, created_assessment):
     assert created_assessment in assessment_ids
 
 def test_get_manager_subordinates(created_assessment, created_employee):
+    """Test getting manager's subordinate employees"""
     manager_id = created_employee["manager_id"]
     url = f"{BASE_URL}/assessment/{created_assessment}/manager/{manager_id}/subordinates"
     r = requests.get(url, headers={})
@@ -186,6 +205,7 @@ def test_get_manager_subordinates(created_assessment, created_employee):
 
 
 def test_export_employee_data(created_assessment):
+    """Test exporting employee data as Excel file"""
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/export"
     
     export_body = {
@@ -195,11 +215,13 @@ def test_export_employee_data(created_assessment):
     r = requests.post(url, json=export_body, headers=HEADERS)
     assert r.status_code == 200, r.text
     
+    # Verify file download headers
     assert 'attachment' in r.headers.get('Content-Disposition', '')
     assert len(r.content) > 0
 
 
 def test_notify_employee(created_assessment, created_employee):
+    """Test sending notification to employee"""
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/share-link"
     
     notify_body = {
@@ -215,9 +237,11 @@ import time
 
 @pytest.fixture(scope="module")
 def assessment_with_varied_statuses(created_assessment):
+    """Create assessment with employees in different completion statuses"""
     assessment_id = created_assessment
     employee_ids = {}
 
+    # Create employees with different statuses
     for status in ["CREATED", "COMPLETED"]:
         rand_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
         body = {
@@ -228,6 +252,7 @@ def assessment_with_varied_statuses(created_assessment):
         r = requests.post(url, json=body, headers=HEADERS)
         employee_ids[status] = r.json()["data"]["id"]
     
+    # Create a test question
     q_url = f"{BASE_URL}/assessment/{assessment_id}/question"
     q_body = {
         "capabilities": "TECHNICAL SKILLS 1", "capabilities_label": "TECHNICAL SKILLS 1",
@@ -239,6 +264,7 @@ def assessment_with_varied_statuses(created_assessment):
     assert r_q.status_code == 200, f"Failed to create question: {r_q.text}"
     question_id = r_q.json()["id"]
 
+    # Submit response for one employee
     submit_url = f"{API_HOST}/backend/v1/employee/{employee_ids['COMPLETED']}/assessment/{assessment_id}/response"
     submit_body = {
         "responses": [{"question_id": question_id, "options": [{"option": "A"}]}],
@@ -247,20 +273,23 @@ def assessment_with_varied_statuses(created_assessment):
     r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
     assert r_submit.status_code == 200, f"Failed to submit response: {r_submit.text}"
     
+    # Publish results
     publish_url = f"{BASE_URL}/assessment/{assessment_id}/result/visibility"
     publish_body = {"result_visibility": "MANAGER_AND_EMPLOYEE"}
     r_publish = requests.put(publish_url, json=publish_body, headers=HEADERS)
     assert r_publish.status_code == 200, f"Failed to publish result: {r_publish.text}"
 
+    # Verify the completed employee
     verify_url = f"{BASE_URL}/assessment/{assessment_id}/employee/{employee_ids['COMPLETED']}/verify"
     r_verify = requests.post(verify_url, headers=HEADERS) 
     assert r_verify.status_code == 200, f"Failed to verify employee: {r_verify.text}"
 
-    time.sleep(2) 
+    time.sleep(2)  # Wait for status updates
     
     yield {"assessment_id": assessment_id, "employee_ids": employee_ids}
 
 def test_admin_can_see_employee_status(assessment_with_varied_statuses):
+    """Test that admin can see different employee statuses"""
     assessment_id = assessment_with_varied_statuses["assessment_id"]
     
     url = f"{BASE_URL}/assessment/{assessment_id}/employees?page=1&size=10"
@@ -271,11 +300,12 @@ def test_admin_can_see_employee_status(assessment_with_varied_statuses):
     
     statuses = {emp['id']: emp['status'] for emp in employees_data}
     
+    # Check that employees have correct statuses
     assert statuses.get(assessment_with_varied_statuses["employee_ids"]["CREATED"]) == "CREATED"
-    
     assert statuses.get(assessment_with_varied_statuses["employee_ids"]["COMPLETED"]) == "PROFILE_VERIFIED"
 
 def test_notify_multiple_employees(created_assessment, created_employee):
+    """Test sending notifications to multiple employees"""
     rand_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
     body = {
         "email": f"multi_notify_{rand_suffix}@example.com",
@@ -285,6 +315,8 @@ def test_notify_multiple_employees(created_assessment, created_employee):
     url = f"{BASE_URL}/assessment/{created_assessment}/employee"
     r = requests.post(url, json=body, headers=HEADERS)
     second_employee_id = r.json()["data"]["id"]
+    
+    # Send notification to both employees
     url = f"{BASE_URL}/assessment/{created_assessment}/employee/share-link"
     notify_body = {"employee_ids": [created_employee["employee_id"], second_employee_id]}
     r_notify = requests.post(url, json=notify_body, headers=HEADERS)
@@ -292,6 +324,7 @@ def test_notify_multiple_employees(created_assessment, created_employee):
     assert r_notify.json()["message"] == "success"
 
 def test_admin_can_copy_assessment_link(created_assessment, created_employee):
+    """Test getting shareable assessment link for employee"""
     assessment_id = created_assessment
     employee_id = created_employee["employee_id"]
     url = f"{BASE_URL}/assessment/{assessment_id}/employee/{employee_id}/result/link"
@@ -303,12 +336,10 @@ def test_admin_can_copy_assessment_link(created_assessment, created_employee):
 
 
 def test_update_employee_via_excel_upload(created_assessment, created_employee):
-    """
-    Tests updating an existing employee's data by uploading an Excel file
-    that perfectly matches the required template structure and data validation.
-    """
+    """Test updating employee data via Excel file upload"""
     employee_id = created_employee["employee_id"]
     
+    # Get current employee data
     emp_details_url = f"{BASE_URL}/employee/{employee_id}"
     r_emp = requests.get(emp_details_url, headers=HEADERS)
     assert r_emp.status_code == 200
@@ -316,14 +347,17 @@ def test_update_employee_via_excel_upload(created_assessment, created_employee):
     employee_email = employee_data["email"]
     manager_email = employee_data["manager"]["email"] 
 
+    # Create Excel file with proper template structure
     wb = Workbook()
     ws = wb.active
 
+    # Merge cells for headers
     ws.merge_cells('H1:I1')
     ws.merge_cells('M1:R1')
     ws.merge_cells('S1:T1')
     ws.merge_cells('V1:W1')
 
+    # First header row
     header_row_1 = [
         "SN", "Name", "Email", "Country Code", "Phone Number", "Position", "Title",
         "Span of Control", None, "Join Date", "Tenure", "Years to Retirement",
@@ -332,6 +366,7 @@ def test_update_employee_via_excel_upload(created_assessment, created_employee):
     ]
     ws.append(header_row_1)
 
+    # Second header row
     header_row_2 = [
         None, None, None, None, None, None, None,
         "Number of Direct Reports", "Number of Indirect Reports", None, None, None,
@@ -340,6 +375,7 @@ def test_update_employee_via_excel_upload(created_assessment, created_employee):
     ]
     ws.append(header_row_2)
 
+    # Data row with updated name
     update_data_row = [
         1, "Updated Name", employee_email, None, None, None, None, None, None,
         None, None, None, 
@@ -350,16 +386,19 @@ def test_update_employee_via_excel_upload(created_assessment, created_employee):
     ]
     ws.append(update_data_row)
     
+    # Save to memory stream
     file_stream = io.BytesIO()
     wb.save(file_stream)
     file_stream.seek(0)
     
+    # Upload the file
     files = {'file': ('update.xlsx', file_stream, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
     upload_headers = {"Authorization": HEADERS["Authorization"]}
     upload_url = f"{BASE_URL}/assessment/{created_assessment}/employee/upload"
     r_upload = requests.post(upload_url, headers=upload_headers, files=files)
     assert r_upload.status_code == 200, f"Upload failed: {r_upload.text}"
 
+    # Verify the update worked
     r_verify = requests.get(emp_details_url, headers=HEADERS)
     assert r_verify.status_code == 200
     updated_name = r_verify.json()["data"]["name"]

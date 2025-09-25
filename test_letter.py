@@ -1,3 +1,7 @@
+"""
+Letter tests
+Tests "letter to yourself" functionality and email notifications
+"""
 import requests
 import pytest
 import time
@@ -14,7 +18,7 @@ MAILTM_API = "https://api.mail.tm"
 
 @pytest.fixture(scope="module")
 def created_organisation():
-    """Create an organization for testing."""
+    """Create an organization for letter tests"""
     body = {
         "internal_name": "LetterTestOrg",
         "name": "Letter Test Organization",
@@ -26,12 +30,13 @@ def created_organisation():
     assert r.status_code == 200, r.text
     oid = r.json()["data"]["id"]
     yield oid
+    # Cleanup: delete organization after tests
     requests.delete(f"{url}/{oid}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def created_assessment():
-    """Create an assessment for testing letters."""
+    """Create an assessment for letter tests"""
     body = {
         "capabilities": ["TECHNICAL SKILLS 1"],
         "name": "Test assessment for letters",
@@ -43,22 +48,25 @@ def created_assessment():
     assert r.status_code == 200, r.text
     aid = r.json()["data"]["id"]
     yield aid
+    # Cleanup: delete assessment after tests
     requests.delete(f"{url}/{aid}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def mailtm_account():
-    """Create a temporary email account for testing."""
+    """Create a temporary email account for testing notifications"""
     r = requests.get(f"{MAILTM_API}/domains")
     assert r.status_code == 200, r.text
     domains = r.json()["hydra:member"]
     assert domains, "No Mail.tm domains available"
     domain = domains[0]["domain"]
     
+    # Generate random email and password
     local = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
     address = f"{local}@{domain}"
     password = "".join(random.choices(string.ascii_letters + string.digits, k=12))
     
+    # Create account
     r = requests.post(
         f"{MAILTM_API}/accounts",
         json={"address": address, "password": password}
@@ -66,6 +74,7 @@ def mailtm_account():
     assert r.status_code == 201, r.text
     account_id = r.json()["id"]
     
+    # Get auth token
     r = requests.post(
         f"{MAILTM_API}/token",
         json={"address": address, "password": password}
@@ -81,6 +90,7 @@ def mailtm_account():
         "account_id": account_id
     }
     
+    # Cleanup: delete email account after tests
     requests.delete(
         f"{MAILTM_API}/accounts/{account_id}",
         headers={"Authorization": f"Bearer {token}"}
@@ -89,7 +99,7 @@ def mailtm_account():
 
 @pytest.fixture(scope="module")
 def created_employee(created_assessment, mailtm_account):
-    """Create an employee for testing."""
+    """Create an employee for letter tests"""
     email = mailtm_account["address"]
     body = {
         "email": email,
@@ -121,12 +131,13 @@ def created_employee(created_assessment, mailtm_account):
     
     yield emp_id
     
+    # Cleanup: delete employee after tests
     requests.delete(f"{API_HOST}/backend/v1/employee/{emp_id}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def created_letter_template(created_assessment):
-    """Create a letter template for testing."""
+    """Create a letter template for testing"""
     body = {
         "number_of_days": 10,
         "reason_for_joining": "abcd",
@@ -141,7 +152,7 @@ def created_letter_template(created_assessment):
     
 
 def test_create_letter_template(created_assessment):
-    """Test creating a letter template."""
+    """Test creating a letter template"""
     body = {
         "number_of_days": 15,
         "reason_for_joining": "abcd",
@@ -159,7 +170,7 @@ def test_create_letter_template(created_assessment):
 
 
 def test_update_letter_template(created_letter_template):
-    """Test updating a letter template."""
+    """Test updating a letter template"""
     body = {
         "number_of_days": 20,
         "reason_for_joining": "Updated reason for joining",
@@ -176,7 +187,7 @@ def test_update_letter_template(created_letter_template):
 
 
 def test_list_letters(created_assessment, created_letter_template):
-    """Test listing letters with pagination."""
+    """Test listing letters with pagination"""
     url = (
         f"{LETTER_TEMPLATE_URL}/{created_assessment}/letters"
         "?page_number=1&page_size=1"
@@ -198,6 +209,7 @@ def test_send_letter_notification_and_check_inbox(
     created_letter_template,
     mailtm_account
 ):
+    """Test sending letter notification and verifying email delivery"""
     body = {
         "employee_ids": [created_employee]
     }
@@ -206,10 +218,11 @@ def test_send_letter_notification_and_check_inbox(
     r = requests.post(url, json=body, headers=HEADERS)
     assert r.status_code == 200, r.text
     
+    # Check email inbox for the notification
     headers = {"Authorization": f"Bearer {mailtm_account['token']}"}
     messages = []
     
-    for _ in range(60):
+    for _ in range(60):  # Wait up to 60 seconds for email
         r = requests.get(f"{MAILTM_API}/messages", headers=headers)
         assert r.status_code in (200, 201), r.text
         messages = r.json()["hydra:member"]
@@ -219,6 +232,7 @@ def test_send_letter_notification_and_check_inbox(
     
     assert messages, "No messages received in Mail.tm inbox"
     
+    # Get message details
     msg_id = messages[0]["id"]
     r = requests.get(f"{MAILTM_API}/messages/{msg_id}", headers=headers)
     assert r.status_code == 200, r.text
@@ -227,6 +241,7 @@ def test_send_letter_notification_and_check_inbox(
     subject = msg.get("subject", "")
     body_text = msg.get("text") or "".join(msg.get("html", []))
     
+    # Verify email content
     assert subject == "Complete Your Letter to Yourself – Your Journey Starts Here"
     assert body_text[:200] == """Hi Letter Test Employee,
 
@@ -235,24 +250,26 @@ left—your letter to yourself. This letter is your personal commitment, a messa
 from your present s"""
     
 def test_download_letter_excel(created_assessment, created_letter_template):
-    """Test downloading letter responses as Excel."""
+    """Test downloading letter responses as Excel file"""
     url = f"{LETTER_TEMPLATE_URL}/{created_assessment}/letter/export"
     
     r = requests.get(url, headers=HEADERS)
     assert r.status_code == 200, r.text
     
+    # Parse Excel file
     wb = load_workbook(io.BytesIO(r.content), read_only=True, data_only=True)
     ws = wb.active
     
     assert ws is not None, "No active worksheet found"
     
+    # Check headers
     headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
 
     assert len(headers) > 0, "Excel should have at least one column"
     assert headers == ['Employee Name', 'Employee Email', 'Submission Date', 'In the next [input number] days, the one thing that I hope to achieve', 'start', 'stop', 'continue', 'I want to show up as [input reason to join the program] who', 'The moments in my work or life that I want to [input what user wish to be] are', 'sign']
     
 def test_letter_template_with_special_characters(created_assessment):
-    """Test creating letter template with special characters."""
+    """Test creating letter template with special characters"""
     body = {
         "number_of_days": 30,
         "reason_for_joining": "Growth & Development! @Company #2025",
@@ -268,9 +285,10 @@ def test_letter_template_with_special_characters(created_assessment):
 
 
 def test_letter_notification_multiple_employees(created_assessment, created_letter_template):
-    """Test sending letter notification to multiple employees."""
+    """Test sending letter notification to multiple employees"""
     employees = []
     
+    # Create multiple employees
     for i in range(2):
         email = f"test{random.randint(1000,9999)}@example.com"
         body = {
@@ -302,6 +320,7 @@ def test_letter_notification_multiple_employees(created_assessment, created_lett
         emp_id = r.json()["data"]["id"]
         employees.append(emp_id)
     
+    # Send notification to all employees
     body = {
         "employee_ids": employees
     }
@@ -310,12 +329,13 @@ def test_letter_notification_multiple_employees(created_assessment, created_lett
     r = requests.post(url, json=body, headers=HEADERS)
     assert r.status_code == 200, r.text
         
+    # Cleanup: delete test employees
     for emp_id in employees:
         requests.delete(f"{API_HOST}/backend/v1/employee/{emp_id}", headers=HEADERS)
 
 
 def test_letter_pagination(created_assessment, created_letter_template):
-    """Test letter listing with different pagination parameters."""
+    """Test letter listing with different pagination parameters"""
     for page_size in [1, 5, 10]:
         url = (
             f"{LETTER_TEMPLATE_URL}/{created_assessment}/letters"
@@ -332,13 +352,16 @@ def test_letter_pagination(created_assessment, created_letter_template):
         assert len(letters) <= page_size, f"Expected max {page_size} items, got {len(letters)}"
 
 def test_employee_can_view_and_submit_letter(created_assessment, created_employee, created_letter_template):
+    """Test employee workflow: view template and submit letter"""
     base_url = f"{API_HOST}/backend/v1/assessment/{created_assessment}"
 
+    # Get letter template
     template_url = f"{base_url}/letter/template"
     r_template = requests.get(template_url, headers=HEADERS)
     assert r_template.status_code == 200
     assert "reason_for_joining" in r_template.json()["data"]
     
+    # Submit letter content
     submit_url = f"{base_url}/employee/{created_employee}/letter"
     submit_body = {
         "content": {
@@ -354,6 +377,7 @@ def test_employee_can_view_and_submit_letter(created_assessment, created_employe
     r_submit = requests.post(submit_url, json=submit_body, headers=HEADERS)
     assert r_submit.status_code == 200, r_submit.text
     
+    # Verify submission
     r_verify = requests.get(submit_url, headers=HEADERS)
     assert r_verify.status_code == 200
     

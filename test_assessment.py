@@ -1,3 +1,7 @@
+"""
+Assessment management tests
+Tests CRUD operations for assessments
+"""
 import requests
 import pytest
 import json
@@ -9,6 +13,7 @@ ASSESS_LIST_URL = f"{API_HOST}/backend/v1/assessments"
 
 @pytest.fixture(scope="module")
 def created_assessment():
+    """Create a test assessment and clean up after tests"""
     body = {
         "capabilities":     ["TECHNICAL SKILLS 1"],
         "name":             "Pranav test 1",
@@ -20,11 +25,13 @@ def created_assessment():
     aid = response.json()["data"]["id"]
     yield aid
 
+    # Cleanup: delete assessment after tests
     dr = requests.delete(f"{ASSESS_URL}/{aid}", headers=HEADERS)
     assert dr.status_code == 204
 
 
 def test_get_assessment_details(created_assessment):
+    """Test retrieving assessment details"""
     response = requests.get(f"{ASSESS_URL}/{created_assessment}", headers=HEADERS)
     assert response.status_code == 200
     data = response.json()["data"]
@@ -32,15 +39,18 @@ def test_get_assessment_details(created_assessment):
     assert data["name"] == "Pranav test 1"
 
 def test_update_assessment(created_assessment):
+    """Test updating assessment information"""
     upd = {"name": "Pranav test updated"}
     response1 = requests.put(f"{ASSESS_URL}/{created_assessment}", json=upd, headers=HEADERS)
     assert response1.status_code == 200
 
+    # Verify the update worked
     response2 = requests.get(f"{ASSESS_URL}/{created_assessment}", headers=HEADERS)
     assert response2.json()["data"]["name"] == "Pranav test updated"
 
 
 def test_list_assessments(created_assessment):
+    """Test listing all assessments"""
     response = requests.get(ASSESS_LIST_URL, headers=HEADERS)
     assert response.status_code == 200
     ids = [item["id"] for item in response.json()["data"]]
@@ -48,6 +58,7 @@ def test_list_assessments(created_assessment):
 
 
 def test_delete_assessment():
+    """Test assessment deletion"""
     body = {
         "capabilities":     ["TECHNICAL SKILLS 1"],
         "name":             "ToBeDeleted",
@@ -58,15 +69,18 @@ def test_delete_assessment():
     assert response0.status_code == 200
     aid = response0.json()["data"]["id"]
 
+    # Delete the assessment
     response1 = requests.delete(f"{ASSESS_URL}/{aid}", headers=HEADERS)
     assert response1.status_code == 204
 
+    # Verify it's gone
     response2 = requests.get(f"{ASSESS_URL}/{aid}", headers=HEADERS)
     assert response2.status_code in (404, 403)
 
 def test_create_assessment_with_missing_name():
+    """Test validation: missing name should fail"""
     invalid_body = {
-        # "name" is missing
+        # "name" is missing - should cause validation error
         "capabilities":     ["TECHNICAL SKILLS 1"],
         "show_onboarding":  False,
         "assessment_type":  "EMPLOYEE"
@@ -75,11 +89,13 @@ def test_create_assessment_with_missing_name():
     assert response.status_code == 400
 
 def test_get_assessment_summary(created_assessment):
+    """Test getting assessment summary statistics"""
     summary_url = f"{ASSESS_URL}/{created_assessment}/summary"
     response = requests.get(summary_url, headers=HEADERS)
     
     assert response.status_code == 200, response.text
     
     summary_data = response.json()["data"]
+    # New assessment should have no employees
     assert summary_data['total_employee_count'] == 0
     assert summary_data['self_assessment_completed_count'] == 0

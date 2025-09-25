@@ -1,3 +1,7 @@
+"""
+Employee assessment results tests
+Tests assessment result viewing and analysis
+"""
 # import requests
 # import pytest
 # import random

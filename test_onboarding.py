@@ -1,3 +1,7 @@
+"""
+Onboarding tests
+Tests employee onboarding configuration and workflows
+"""
 import requests
 import pytest
 import random
@@ -8,7 +12,7 @@ ASSESS_URL = f"{API_HOST}/backend/v1/assessment"
 
 @pytest.fixture(scope="module")
 def created_assessment():
-    """Create an assessment to configure onboarding for."""
+    """Create an assessment for onboarding tests"""
     body = {
         "capabilities": ["TECHNICAL SKILLS 1"],
         "name": "Test Assessment for Onboarding",
@@ -19,12 +23,13 @@ def created_assessment():
     r.raise_for_status()
     aid = r.json()["data"]["id"]
     yield aid
+    # Cleanup: delete assessment after tests
     requests.delete(f"{ASSESS_URL}/{aid}", headers=HEADERS)
 
 
 @pytest.fixture(scope="module")
 def created_employee(created_assessment):
-    """Create an employee to test employee-specific onboarding endpoints."""
+    """Create an employee for onboarding tests"""
     rand_id = "".join(random.choices(string.ascii_lowercase, k=5))
     create_url = f"{ASSESS_URL}/{created_assessment}/employee"
     body = {
@@ -36,13 +41,16 @@ def created_employee(created_assessment):
     assert r.status_code == 201, r.text
     eid = r.json()["data"]["id"]
     yield eid
+    # Cleanup: delete employee after tests
     delete_url = f"{API_HOST}/backend/v1/employee/{eid}"
     requests.delete(delete_url, headers=HEADERS)
 
 
 def test_setup_and_get_onboarding_data(created_assessment, created_employee):
+    """Test setting up onboarding configuration and retrieving it"""
     base_onboarding_url = f"{ASSESS_URL}/{created_assessment}/onboarding/home"
 
+    # Setup onboarding configuration
     setup_body = {
         "program_name": "P1",
         "service_personalization": [
@@ -55,6 +63,7 @@ def test_setup_and_get_onboarding_data(created_assessment, created_employee):
     r_setup = requests.post(base_onboarding_url, json=setup_body, headers=HEADERS)
     assert r_setup.status_code == 200, r_setup.text
 
+    # Get onboarding data for specific employee
     get_url = f"{base_onboarding_url}?employee_id={created_employee}"
     r_get = requests.get(get_url, headers=HEADERS)
     assert r_get.status_code == 200, r_get.text
@@ -67,11 +76,10 @@ def test_setup_and_get_onboarding_data(created_assessment, created_employee):
 
 
 def test_send_onboarding_email(created_assessment):
-    """
-    Tests the endpoint that triggers sending onboarding emails.
-    """
+    """Test sending onboarding emails to employees"""
     setup_url = f"{ASSESS_URL}/{created_assessment}/onboarding/home"
     
+    # Setup onboarding first
     setup_body = {
         "program_name": "Email Test",
         "service_personalization": [
@@ -82,17 +90,17 @@ def test_send_onboarding_email(created_assessment):
     }
     requests.post(setup_url, json=setup_body, headers=HEADERS).raise_for_status()
 
+    # Send onboarding emails
     email_url = f"{ASSESS_URL}/{created_assessment}/onboarding/email"
     r_email = requests.post(email_url, headers=HEADERS)
     assert r_email.status_code == 200, r_email.text
 
 
 def test_admin_can_edit_onboarding_content(created_assessment):
-    """
-    Tests that an admin can update an existing onboarding configuration.
-    """
+    """Test that admin can update onboarding configuration"""
     onboarding_url = f"{ASSESS_URL}/{created_assessment}/onboarding/home"
 
+    # Initial setup
     setup_body = {
         "program_name": "Initial Program Name",
         "service_personalization": [{"service": "LETTER_TO_YOURSELF", "position": 0}],
@@ -101,6 +109,7 @@ def test_admin_can_edit_onboarding_content(created_assessment):
     r_setup = requests.post(onboarding_url, json=setup_body, headers=HEADERS)
     assert r_setup.status_code == 200, f"Onboarding setup failed: {r_setup.text}"
 
+    # Update configuration
     update_body = {
         "program_name": "Updated Program Name",
         "service_personalization": [
@@ -112,6 +121,7 @@ def test_admin_can_edit_onboarding_content(created_assessment):
     r_update = requests.post(onboarding_url, json=update_body, headers=HEADERS)
     assert r_update.status_code == 200, f"Onboarding update failed: {r_update.text}"
 
+    # Verify the update
     r_get = requests.get(onboarding_url, headers=HEADERS)
     assert r_get.status_code == 200
     updated_data = r_get.json()["data"]
